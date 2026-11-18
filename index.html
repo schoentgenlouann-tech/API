@@ -17,6 +17,8 @@
       <nav class="primary-nav" aria-label="Main navigation">
         <button class="nav-link active" type="button" data-view="explore" aria-current="page">Explore</button>
         <button class="nav-link" type="button" data-view="favorites">My Favorites <span id="favorite-nav-count" class="nav-count">0</span></button>
+        <button class="nav-link" type="button" data-view="watchlist">My Watchlist <span id="watchlist-nav-count" class="nav-count">0</span></button>
+        <button class="nav-link" type="button" data-view="continue">Continue Watching</button>
       </nav>
       <a class="header-link" href="https://www.tvmaze.com/api" target="_blank" rel="noreferrer">About the data <span aria-hidden="true">↗</span></a>
     </header>
@@ -50,6 +52,13 @@
 
       <section id="show-section" class="content-section show-section" aria-labelledby="show-title" hidden>
         <div id="show-details" class="show-details"></div>
+        <div id="tracking-prompt" class="tracking-prompt" hidden>
+          <p id="tracking-prompt-text"></p>
+          <div class="tracking-prompt-actions">
+            <button id="tracking-prompt-action" class="small-action primary" type="button"></button>
+            <button id="tracking-prompt-dismiss" class="small-action" type="button">Not now</button>
+          </div>
+        </div>
         <div class="episodes-heading">
           <div>
             <p class="eyebrow">THE COMPLETE GUIDE</p>
@@ -72,6 +81,31 @@
         </div>
         <div id="favorites-list" class="show-grid"></div>
         <p id="favorites-empty" class="empty-favorites" hidden>Your favorites list is empty. Explore shows and tap the heart to save one here.</p>
+      </section>
+
+      <section id="watchlist-section" class="content-section watchlist-section" aria-labelledby="watchlist-heading" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">YOUR VIEWING PLAN</p>
+            <h2 id="watchlist-heading">My Watchlist</h2>
+          </div>
+          <span id="watchlist-count" class="result-count"></span>
+        </div>
+        <div id="watchlist-filters" class="filter-tabs" role="group" aria-label="Filter watchlist by status"></div>
+        <div id="watchlist-list" class="show-grid"></div>
+        <p id="watchlist-empty" class="empty-favorites" hidden></p>
+      </section>
+
+      <section id="continue-section" class="content-section continue-section" aria-labelledby="continue-heading" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">PICK UP WHERE YOU LEFT OFF</p>
+            <h2 id="continue-heading">Continue Watching</h2>
+          </div>
+          <span id="continue-count" class="result-count"></span>
+        </div>
+        <div id="continue-list" class="show-grid"></div>
+        <p id="continue-empty" class="empty-favorites" hidden>You haven't started watching any shows yet. Set a show to Currently Watching in your watchlist.</p>
       </section>
     </main>
 

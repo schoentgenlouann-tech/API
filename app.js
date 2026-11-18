@@ -1,5 +1,12 @@
 const API_BASE = "https://api.tvmaze.com";
 const FAVORITES_KEY = "tv-show-explorer-favorites";
+const TRACKING_KEY = "tv-show-explorer-tracking-v1";
+const WATCH_STATUSES = [
+  { value: "want", label: "Want to Watch" },
+  { value: "watching", label: "Currently Watching" },
+  { value: "completed", label: "Completed" },
+  { value: "dropped", label: "Dropped" },
+];
 const searchForm = document.querySelector("#search-form");
 const searchInput = document.querySelector("#show-query");
 const searchButton = searchForm.querySelector("button");
@@ -7,6 +14,7 @@ const statusMessage = document.querySelector("#status-message");
 const exploreHero = document.querySelector("#explore-hero");
 const navButtons = document.querySelectorAll(".nav-link");
 const favoriteNavCount = document.querySelector("#favorite-nav-count");
+const watchlistNavCount = document.querySelector("#watchlist-nav-count");
 const searchSection = document.querySelector("#search-section");
 const resultsContainer = document.querySelector("#show-results");
 const resultCount = document.querySelector("#result-count");
@@ -19,6 +27,19 @@ const favoritesSection = document.querySelector("#favorites-section");
 const favoritesList = document.querySelector("#favorites-list");
 const favoritesCount = document.querySelector("#favorites-count");
 const favoritesEmpty = document.querySelector("#favorites-empty");
+const watchlistSection = document.querySelector("#watchlist-section");
+const watchlistFilters = document.querySelector("#watchlist-filters");
+const watchlistList = document.querySelector("#watchlist-list");
+const watchlistCount = document.querySelector("#watchlist-count");
+const watchlistEmpty = document.querySelector("#watchlist-empty");
+const continueSection = document.querySelector("#continue-section");
+const continueList = document.querySelector("#continue-list");
+const continueCount = document.querySelector("#continue-count");
+const continueEmpty = document.querySelector("#continue-empty");
+const trackingPrompt = document.querySelector("#tracking-prompt");
+const trackingPromptText = document.querySelector("#tracking-prompt-text");
+const trackingPromptAction = document.querySelector("#tracking-prompt-action");
+const trackingPromptDismiss = document.querySelector("#tracking-prompt-dismiss");
 
 const searchCache = new Map();
 const showCache = new Map();
@@ -27,12 +48,19 @@ const episodeCache = new Map();
 const episodeRequests = new Map();
 const knownShows = new Map();
 let favorites = loadFavorites();
+let watchlist = loadTracking();
 let currentView = "explore";
 let detailReturnView = "explore";
+let watchlistFilter = "all";
 let hasSearchResults = false;
 let activeSearchController;
 let searchSequence = 0;
 let episodeSequence = 0;
+let watchlistSequence = 0;
+let continueSequence = 0;
+let activeShow;
+let activeEpisodes = [];
+const dismissedPrompts = new Set();
 
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -50,7 +78,29 @@ seasonSelect.addEventListener("change", () => {
   season.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
+watchlistFilters.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-watch-filter]") : null;
+  if (!button) return;
+  watchlistFilter = button.dataset.watchFilter;
+  renderWatchlist();
+});
+
+trackingPromptAction.addEventListener("click", () => {
+  const promptType = trackingPrompt.dataset.promptType;
+  if (!activeShow || !promptType) return;
+  const nextStatus = promptType === "complete" ? "completed" : "watching";
+  setWatchStatus(activeShow, nextStatus);
+});
+
+trackingPromptDismiss.addEventListener("click", () => {
+  const key = trackingPrompt.dataset.promptKey;
+  if (key) dismissedPrompts.add(key);
+  trackingPrompt.hidden = true;
+});
+
 updateFavoriteCount();
+updateWatchlistCount();
+renderWatchlistFilters();
 
 async function searchShows(rawQuery) {
   const query = rawQuery.trim();
@@ -106,7 +156,7 @@ function renderSearchResults(matches) {
   searchSection.hidden = false;
 }
 
-function createShowCard(show, { favoriteView = false } = {}) {
+function createShowCard(show, { favoriteView = false, watchlistView = false, continueView = false } = {}) {
   knownShows.set(show.id, show);
   const card = document.createElement("article");
   card.className = "show-card";
@@ -132,14 +182,39 @@ function createShowCard(show, { favoriteView = false } = {}) {
     meta.textContent = "Loading season and episode totals…";
     meta.dataset.statsFor = String(show.id);
   } else {
-    meta.textContent = [premiereYear(show.premiered), show.genres?.slice(0, 2).join(" · ")].filter(Boolean).join(" · ") || "TV series";
+    meta.textContent = [premiereYear(show.premiered), show.genres?.join(" · ")].filter(Boolean).join(" · ") || "TV series";
   }
   copy.append(title, description, meta);
+  if (watchlistView || continueView) {
+    const status = document.createElement("span");
+    status.className = "watch-status-badge";
+    status.textContent = statusLabel(watchlist.get(show.id)?.status);
+    copy.append(status);
+  }
+  if (continueView) {
+    const meter = createProgressMeter(show.id, episodeCache.get(show.id) || [], "show");
+    copy.append(meter);
+    const next = document.createElement("p");
+    next.className = "continue-next";
+    next.dataset.nextFor = String(show.id);
+    next.textContent = "Loading next episode…";
+    copy.append(next);
+  }
   main.append(copy);
   main.addEventListener("click", () => openShow(show, currentView));
 
-  const favoriteButton = createFavoriteButton(show);
-  card.append(main, favoriteButton);
+  const actions = document.createElement("div");
+  actions.className = "show-card-actions";
+  actions.append(createFavoriteButton(show), createWatchlistControl(show));
+  if (watchlistView) {
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "remove-watchlist-button";
+    removeButton.textContent = "Remove";
+    removeButton.addEventListener("click", () => removeFromWatchlist(show.id));
+    actions.append(removeButton);
+  }
+  card.append(main, actions);
   return card;
 }
 
@@ -156,6 +231,44 @@ function createFavoriteButton(show) {
   return button;
 }
 
+function createWatchlistControl(show, { includeRemove = false } = {}) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "watchlist-control";
+  wrapper.dataset.showId = String(show.id);
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", `Watch status for ${show.name}`);
+  const currentStatus = watchlist.get(show.id)?.status || "";
+  const prompt = document.createElement("option");
+  prompt.value = "";
+  prompt.textContent = currentStatus ? "Change status…" : "Add to Watchlist…";
+  prompt.disabled = Boolean(currentStatus);
+  select.append(prompt);
+  for (const status of WATCH_STATUSES) {
+    const option = document.createElement("option");
+    option.value = status.value;
+    option.textContent = status.label;
+    select.append(option);
+  }
+  if (includeRemove && currentStatus) {
+    const removeOption = document.createElement("option");
+    removeOption.value = "__remove__";
+    removeOption.textContent = "Remove from Watchlist";
+    select.append(removeOption);
+  }
+  select.value = currentStatus;
+  select.addEventListener("change", () => {
+    if (select.value === "__remove__") removeFromWatchlist(show.id);
+    else if (select.value && select.value !== currentStatus) {
+      select.disabled = true;
+      setWatchStatus(show, select.value).finally(() => {
+        if (select.isConnected) select.disabled = false;
+      });
+    }
+  });
+  wrapper.append(select);
+  return wrapper;
+}
+
 async function openShow(show, returnView = currentView) {
   if (!Number.isInteger(show.id) || show.id <= 0) {
     showStatus("This result has an invalid TVmaze show ID. Choose another show.", "error");
@@ -166,6 +279,9 @@ async function openShow(show, returnView = currentView) {
   searchSection.hidden = true;
   favoritesSection.hidden = true;
   showSection.hidden = false;
+  activeShow = undefined;
+  activeEpisodes = [];
+  trackingPrompt.hidden = true;
   showDetails.replaceChildren(createDetailLoading(show));
   const sequence = ++episodeSequence;
   showStatus(`Loading episodes for ${show.name}…`);
@@ -236,6 +352,8 @@ async function getEpisodes(showId) {
 }
 
 function renderShow(show, episodes) {
+  activeShow = show;
+  activeEpisodes = episodes;
   const toolbar = document.createElement("div");
   toolbar.className = "show-detail-toolbar";
   toolbar.dataset.showId = String(show.id);
@@ -247,7 +365,7 @@ function renderShow(show, episodes) {
     showSection.hidden = true;
     setView(detailReturnView);
   });
-  toolbar.append(backButton, createFavoriteButton(show, false));
+  toolbar.append(backButton, createWatchlistControl(show, { includeRemove: true }), createFavoriteButton(show, false));
 
   const content = document.createElement("div");
   content.className = "show-detail-content";
@@ -281,11 +399,12 @@ function renderShow(show, episodes) {
   const stats = document.createElement("div");
   stats.className = "show-overview-stats";
   stats.textContent = `${seasons.filter(([season]) => season > 0).length} seasons · ${episodes.length} episodes`;
-  info.append(title, facts, description, genres, stats);
+  info.append(title, facts, description, genres, stats, createProgressMeter(show.id, episodes, "show"));
   content.append(info);
   showDetails.replaceChildren(toolbar, content);
   episodeTotal.textContent = episodes.length;
-  renderSeasons(seasons);
+  renderTrackingPrompt(show, episodes);
+  renderSeasons(seasons, show);
 }
 
 function seasonEntries(episodes) {
@@ -303,7 +422,7 @@ function seasonEntries(episodes) {
     .sort(([a], [b]) => a - b);
 }
 
-function renderSeasons(seasons) {
+function renderSeasons(seasons, show) {
   seasonSelect.replaceChildren();
   seasonList.replaceChildren();
   if (!seasons.length) {
@@ -334,20 +453,36 @@ function renderSeasons(seasons) {
     count.className = "season-count";
     count.textContent = `${seasonEpisodes.length} ${seasonEpisodes.length === 1 ? "episode" : "episodes"}`;
     seasonName.append(count);
-    summary.append(seasonName);
+    summary.append(seasonName, createProgressMeter(show.id, seasonEpisodes, "season", seasonNumber));
 
+    const controls = document.createElement("div");
+    controls.className = "season-tracking-controls";
+    controls.append(createProgressMeter(show.id, seasonEpisodes, "season", seasonNumber));
+    const markAllButton = document.createElement("button");
+    markAllButton.type = "button";
+    markAllButton.className = "small-action primary";
+    markAllButton.textContent = "Mark season watched";
+    markAllButton.addEventListener("click", () => setSeasonWatched(show, seasonNumber, seasonEpisodes, true));
+    const resetButton = document.createElement("button");
+    resetButton.type = "button";
+    resetButton.className = "small-action";
+    resetButton.textContent = "Reset season";
+    resetButton.addEventListener("click", () => setSeasonWatched(show, seasonNumber, seasonEpisodes, false));
+    controls.append(markAllButton, resetButton);
     const list = document.createElement("div");
     list.className = "episode-list";
-    for (const episode of seasonEpisodes) list.append(createEpisode(episode));
-    details.append(summary, list);
+    for (const episode of seasonEpisodes) list.append(createEpisode(episode, show));
+    details.append(summary, controls, list);
     seasonList.append(details);
   }
   seasonSelect.value = String(seasons[0][0]);
 }
 
-function createEpisode(episode) {
+function createEpisode(episode, show) {
   const article = document.createElement("article");
   article.className = "episode";
+  const isWatched = watchlist.get(show.id)?.watchedEpisodeIds.has(episode.id) || false;
+  if (isWatched) article.classList.add("is-watched");
   if (episode.image?.medium) {
     const image = createImage(episode.image.medium, episode.name);
     if (image) {
@@ -374,7 +509,19 @@ function createEpisode(episode) {
   description.className = "episode-summary";
   description.textContent = summaryText(episode.summary) || "No episode description available.";
   copy.append(titleRow, meta, description);
-  article.append(copy);
+  const watchLabel = document.createElement("label");
+  watchLabel.className = "episode-watch-toggle";
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = isWatched;
+  checkbox.disabled = !Number.isInteger(episode.id) || episode.id <= 0;
+  checkbox.dataset.episodeId = String(episode.id);
+  checkbox.setAttribute("aria-label", `${isWatched ? "Mark as unwatched" : "Mark as watched"}: ${episode.name || "episode"}`);
+  checkbox.addEventListener("change", () => toggleEpisodeWatched(show, episode, checkbox.checked));
+  const watchText = document.createElement("span");
+  watchText.textContent = "Watched";
+  watchLabel.append(checkbox, watchText);
+  article.append(copy, watchLabel);
   return article;
 }
 
@@ -399,6 +546,341 @@ function renderFavorites() {
 function formatFavoriteStats(show, episodes) {
   const seasonCount = seasonEntries(episodes).filter(([season]) => season > 0).length;
   return `${seasonCount} ${seasonCount === 1 ? "season" : "seasons"} · ${episodes.length} episodes${show.status ? ` · ${show.status}` : ""}`;
+}
+
+function loadTracking() {
+  try {
+    const saved = localStorage.getItem(TRACKING_KEY);
+    if (!saved) return new Map();
+    const data = JSON.parse(saved);
+    if (data.version !== 1 || !Array.isArray(data.shows)) throw new Error("Unsupported tracking data.");
+    const entries = data.shows
+      .filter((entry) => entry && Number.isInteger(entry.showId) && entry.showId > 0
+        && WATCH_STATUSES.some((status) => status.value === entry.status))
+      .map((entry) => [entry.showId, {
+        status: entry.status,
+        watchedEpisodeIds: new Set(
+          Array.isArray(entry.watchedEpisodeIds)
+            ? entry.watchedEpisodeIds.filter((id) => Number.isInteger(id) && id > 0)
+            : [],
+        ),
+      }]);
+    return new Map(entries);
+  } catch {
+    showStatus("Watchlist data couldn't be read from this browser. You can still track shows during this visit.", "error");
+    return new Map();
+  }
+}
+
+function persistTracking(nextWatchlist) {
+  try {
+    const data = {
+      version: 1,
+      shows: [...nextWatchlist].map(([showId, entry]) => ({
+        showId,
+        status: entry.status,
+        watchedEpisodeIds: [...entry.watchedEpisodeIds],
+      })),
+    };
+    localStorage.setItem(TRACKING_KEY, JSON.stringify(data));
+    watchlist = nextWatchlist;
+    updateWatchlistCount();
+    renderWatchlistFilters();
+    return true;
+  } catch {
+    showStatus("Your browser couldn't save this tracking change. Check local storage settings and try again.", "error");
+    return false;
+  }
+}
+
+async function setWatchStatus(show, status) {
+  if (!WATCH_STATUSES.some((item) => item.value === status)) return;
+  const current = watchlist.get(show.id);
+  if (current?.status === status) return;
+  let watchedEpisodeIds = new Set(current?.watchedEpisodeIds || []);
+  if (status === "completed") {
+    try {
+      const episodes = await getEpisodes(show.id);
+      watchedEpisodeIds = new Set(episodes.filter((episode) => Number.isInteger(episode.id) && episode.id > 0).map((episode) => episode.id));
+    } catch (error) {
+      showStatus(error.message || "Couldn't load episodes to complete this show.", "error");
+      refreshWatchlistControls(show.id);
+      return;
+    }
+  }
+
+  const next = new Map(watchlist);
+  next.set(show.id, { status, watchedEpisodeIds });
+  if (!persistTracking(next)) {
+    refreshWatchlistControls(show.id);
+    return;
+  }
+  knownShows.set(show.id, show);
+  refreshWatchlistControls(show.id);
+  if (currentView === "watchlist") renderWatchlist();
+  if (currentView === "continue") renderContinueWatching();
+  rerenderActiveShow();
+  showStatus(`${show.name} moved to ${statusLabel(status)}.`);
+}
+
+function removeFromWatchlist(showId) {
+  const show = knownShows.get(showId) || favorites.get(showId);
+  const next = new Map(watchlist);
+  next.delete(showId);
+  if (!persistTracking(next)) return;
+  refreshWatchlistControls(showId);
+  if (currentView === "watchlist") renderWatchlist();
+  if (currentView === "continue") renderContinueWatching();
+  rerenderActiveShow();
+  showStatus(show ? `${show.name} removed from your watchlist.` : "Show removed from your watchlist.");
+}
+
+function refreshWatchlistControls(showId) {
+  const show = knownShows.get(showId) || favorites.get(showId);
+  if (!show) return;
+  for (const control of document.querySelectorAll(".watchlist-control")) {
+    if (Number(control.dataset.showId) === showId) {
+      control.replaceWith(createWatchlistControl(show, { includeRemove: true }));
+    }
+  }
+}
+
+function toggleEpisodeWatched(show, episode, watched) {
+  if (!Number.isInteger(episode.id) || episode.id <= 0) {
+    showStatus("This episode has no valid TVmaze episode ID and can't be tracked.", "error");
+    return;
+  }
+  const current = watchlist.get(show.id) || { status: "want", watchedEpisodeIds: new Set() };
+  const watchedEpisodeIds = new Set(current.watchedEpisodeIds);
+  if (watched) watchedEpisodeIds.add(episode.id);
+  else watchedEpisodeIds.delete(episode.id);
+  const next = new Map(watchlist);
+  next.set(show.id, { status: current.status, watchedEpisodeIds });
+  if (!persistTracking(next)) {
+    rerenderActiveShow();
+    return;
+  }
+  knownShows.set(show.id, show);
+  rerenderActiveShow(episode.id);
+  if (currentView === "watchlist") renderWatchlist();
+  if (currentView === "continue") renderContinueWatching();
+}
+
+function setSeasonWatched(show, seasonNumber, episodes, watched) {
+  const current = watchlist.get(show.id) || { status: "want", watchedEpisodeIds: new Set() };
+  const watchedEpisodeIds = new Set(current.watchedEpisodeIds);
+  for (const episode of episodes) {
+    if (!Number.isInteger(episode.id) || episode.id <= 0) continue;
+    if (watched) watchedEpisodeIds.add(episode.id);
+    else watchedEpisodeIds.delete(episode.id);
+  }
+  const next = new Map(watchlist);
+  next.set(show.id, { status: current.status, watchedEpisodeIds });
+  if (!persistTracking(next)) return;
+  knownShows.set(show.id, show);
+  rerenderActiveShow();
+  if (currentView === "watchlist") renderWatchlist();
+  if (currentView === "continue") renderContinueWatching();
+  const verb = watched ? "marked watched" : "reset";
+  showStatus(`Season ${seasonNumber || "specials"} ${verb}.`);
+}
+
+function rerenderActiveShow(focusEpisodeId) {
+  if (!activeShow || !activeEpisodes.length || showSection.hidden) return;
+  const scrollPosition = window.scrollY;
+  renderShow(activeShow, activeEpisodes);
+  if (focusEpisodeId) {
+    showDetails.querySelector(`[data-episode-id="${focusEpisodeId}"]`)?.focus({ preventScroll: true });
+  }
+  window.scrollTo(0, scrollPosition);
+}
+
+function progressSnapshot(showId, episodes) {
+  const watchedEpisodeIds = watchlist.get(showId)?.watchedEpisodeIds || new Set();
+  const availableIds = new Set(episodes.filter((episode) => Number.isInteger(episode.id) && episode.id > 0).map((episode) => episode.id));
+  const watched = [...availableIds].filter((id) => watchedEpisodeIds.has(id)).length;
+  const total = episodes.length;
+  return {
+    watched,
+    total,
+    remaining: Math.max(0, total - watched),
+    percentage: total ? Math.floor((watched / total) * 100) : 0,
+  };
+}
+
+function createProgressMeter(showId, episodes, scope, seasonNumber) {
+  const progress = progressSnapshot(showId, episodes);
+  const meter = document.createElement("div");
+  meter.className = `progress-meter${scope === "season" ? " season-progress-meter" : ""}`;
+  meter.dataset.progressShow = String(showId);
+  meter.dataset.progressScope = scope;
+  if (seasonNumber !== undefined) meter.dataset.progressSeason = String(seasonNumber);
+  const label = document.createElement("span");
+  label.className = "progress-label";
+  label.textContent = `${progress.watched}/${progress.total} watched · ${progress.remaining} left · ${progress.percentage}%`;
+  const track = document.createElement("div");
+  track.className = "progress-track";
+  track.setAttribute("role", "progressbar");
+  track.setAttribute("aria-label", scope === "season" ? `Season ${seasonNumber || "specials"} progress` : "Show progress");
+  track.setAttribute("aria-valuemin", "0");
+  track.setAttribute("aria-valuemax", "100");
+  track.setAttribute("aria-valuenow", String(progress.percentage));
+  const fill = document.createElement("span");
+  fill.className = "progress-fill";
+  fill.style.width = `${progress.percentage}%`;
+  track.append(fill);
+  meter.append(label, track);
+  return meter;
+}
+
+function renderTrackingPrompt(show, episodes) {
+  const progress = progressSnapshot(show.id, episodes);
+  const status = watchlist.get(show.id)?.status;
+  let type = "";
+  if (progress.total > 0 && progress.remaining === 0 && status !== "completed") type = "complete";
+  else if (progress.watched > 0 && status !== "watching") type = "watching";
+  const promptKey = type ? `${show.id}:${type}:${progress.watched}` : "";
+  if (!type || dismissedPrompts.has(promptKey)) {
+    trackingPrompt.hidden = true;
+    return;
+  }
+  trackingPrompt.dataset.promptType = type;
+  trackingPrompt.dataset.promptKey = promptKey;
+  trackingPromptText.textContent = type === "complete"
+    ? `You've watched all ${progress.total} available episodes of ${show.name}. Mark it as completed?`
+    : `You've started ${show.name}. Move it to Currently Watching?`;
+  trackingPromptAction.textContent = type === "complete" ? "Mark as Completed" : "Move to Currently Watching";
+  trackingPrompt.hidden = false;
+}
+
+function statusLabel(status) {
+  return WATCH_STATUSES.find((item) => item.value === status)?.label || "Not in Watchlist";
+}
+
+function updateWatchlistCount() {
+  watchlistNavCount.textContent = watchlist.size;
+}
+
+function renderWatchlistFilters() {
+  const filters = [{ value: "all", label: "All" }, ...WATCH_STATUSES];
+  watchlistFilters.replaceChildren(...filters.map(({ value, label }) => {
+    const count = value === "all" ? watchlist.size : [...watchlist.values()].filter((entry) => entry.status === value).length;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `filter-tab${watchlistFilter === value ? " active" : ""}`;
+    button.dataset.watchFilter = value;
+    button.setAttribute("aria-pressed", String(watchlistFilter === value));
+    button.textContent = `${label} ${count}`;
+    return button;
+  }));
+}
+
+function renderWatchlist() {
+  renderWatchlistFilters();
+  const entries = [...watchlist].filter(([, entry]) => watchlistFilter === "all" || entry.status === watchlistFilter);
+  watchlistCount.textContent = `${watchlist.size} ${watchlist.size === 1 ? "show" : "shows"}`;
+  watchlistEmpty.hidden = entries.length !== 0;
+  watchlistList.hidden = entries.length === 0;
+  watchlistEmpty.textContent = watchlist.size
+    ? `No shows in ${statusLabel(watchlistFilter)}.`
+    : "Your watchlist is empty. Add a show from Explore to choose a viewing status.";
+  watchlistList.replaceChildren(...entries.map(([showId]) => createCollectionLoading(showId)));
+  const sequence = ++watchlistSequence;
+
+  for (const [showId, entry] of entries) {
+    getWatchlistShow(showId).then((show) => {
+      if (sequence !== watchlistSequence || watchlist.get(showId)?.status !== entry.status) return;
+      const placeholder = watchlistList.querySelector(`[data-collection-show="${showId}"]`);
+      if (placeholder) placeholder.replaceWith(createShowCard(show, { watchlistView: true }));
+    }).catch(() => {
+      if (sequence !== watchlistSequence) return;
+      const placeholder = watchlistList.querySelector(`[data-collection-show="${showId}"]`);
+      if (placeholder) showCollectionError(placeholder, "Show details couldn't be loaded.");
+    });
+  }
+}
+
+function renderContinueWatching() {
+  const entries = [...watchlist].filter(([, entry]) => entry.status === "watching");
+  continueCount.textContent = `${entries.length} ${entries.length === 1 ? "show" : "shows"}`;
+  continueEmpty.hidden = entries.length !== 0;
+  continueList.hidden = entries.length === 0;
+  continueList.replaceChildren(...entries.map(([showId]) => createCollectionLoading(showId)));
+  const sequence = ++continueSequence;
+
+  for (const [showId] of entries) {
+    Promise.all([getWatchlistShow(showId), getEpisodes(showId)]).then(([show, episodes]) => {
+      if (sequence !== continueSequence || watchlist.get(showId)?.status !== "watching") return;
+      const placeholder = continueList.querySelector(`[data-collection-show="${showId}"]`);
+      if (!placeholder) return;
+      const card = createShowCard(show, { continueView: true });
+      fillContinueCard(card, show, episodes);
+      placeholder.replaceWith(card);
+    }).catch(() => {
+      if (sequence !== continueSequence) return;
+      const placeholder = continueList.querySelector(`[data-collection-show="${showId}"]`);
+      if (placeholder) showCollectionError(placeholder, "Show progress couldn't be loaded.");
+    });
+  }
+}
+
+function getWatchlistShow(showId) {
+  const known = knownShows.get(showId) || favorites.get(showId) || showCache.get(showId);
+  return known ? Promise.resolve(known) : getShow(showId);
+}
+
+function createCollectionLoading(showId) {
+  const card = document.createElement("article");
+  card.className = "collection-loading";
+  card.dataset.collectionShow = String(showId);
+  card.setAttribute("role", "status");
+  card.textContent = "Loading show details…";
+  return card;
+}
+
+function showCollectionError(card, message) {
+  card.className = "collection-loading collection-error";
+  card.replaceChildren();
+  const text = document.createElement("span");
+  text.textContent = message;
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "small-action";
+  retry.textContent = "Retry";
+  retry.addEventListener("click", () => {
+    if (currentView === "watchlist") renderWatchlist();
+    else renderContinueWatching();
+  });
+  card.append(text, retry);
+}
+
+function fillContinueCard(card, show, episodes) {
+  const progress = progressSnapshot(show.id, episodes);
+  const next = episodes.slice().sort(compareEpisodes).find((episode) =>
+    Number.isInteger(episode.id) && episode.id > 0 && !watchlist.get(show.id)?.watchedEpisodeIds.has(episode.id));
+  const nextText = card.querySelector(`[data-next-for="${show.id}"]`);
+  nextText.textContent = next
+    ? `Next up · ${episodePosition(next)} · ${next.name || "Untitled episode"}`
+    : progress.total ? "All available episodes watched" : "No episodes available yet";
+  if (progress.total > 0 && progress.remaining === 0) {
+    const completeButton = document.createElement("button");
+    completeButton.type = "button";
+    completeButton.className = "small-action primary";
+    completeButton.textContent = "Mark as Completed";
+    completeButton.addEventListener("click", () => setWatchStatus(show, "completed"));
+    card.querySelector(".show-card-actions").append(completeButton);
+  }
+}
+
+function compareEpisodes(a, b) {
+  return (a.season ?? 0) - (b.season ?? 0)
+    || (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER);
+}
+
+function episodePosition(episode) {
+  const season = Number.isInteger(episode.season) ? `S${String(episode.season).padStart(2, "0")}` : "Special";
+  const number = Number.isInteger(episode.number) ? `E${String(episode.number).padStart(2, "0")}` : "Special";
+  return `${season} ${number}`;
 }
 
 function toggleFavorite(show) {
@@ -454,8 +936,9 @@ function updateFavoriteCount() {
 }
 
 function setView(view) {
-  currentView = view === "favorites" ? "favorites" : "explore";
-  if (currentView === "favorites") {
+  const views = ["explore", "favorites", "watchlist", "continue"];
+  currentView = views.includes(view) ? view : "explore";
+  if (currentView !== "explore") {
     activeSearchController?.abort();
     activeSearchController = undefined;
     searchSequence += 1;
@@ -471,8 +954,12 @@ function setView(view) {
   searchSection.hidden = currentView !== "explore" || !hasSearchResults;
   showSection.hidden = true;
   favoritesSection.hidden = currentView !== "favorites";
+  watchlistSection.hidden = currentView !== "watchlist";
+  continueSection.hidden = currentView !== "continue";
   clearStatus();
   if (currentView === "favorites") renderFavorites();
+  if (currentView === "watchlist") renderWatchlist();
+  if (currentView === "continue") renderContinueWatching();
 }
 
 function createImage(source, alt) {

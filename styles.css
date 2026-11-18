@@ -77,6 +77,9 @@ h1, h2, h3 { font-family: "Space Grotesk", sans-serif; }
 h1 { margin-bottom: 14px; font-size: clamp(42px, 7vw, 66px); line-height: 1.05; letter-spacing: -.055em; }
 h1 span { color: var(--accent); }
 .hero-copy { margin-bottom: 32px; color: var(--muted); font-size: 16px; }
+.search-modes { width: fit-content; margin: 0 auto 13px; padding: 4px; display: flex; gap: 4px; border: 1px solid var(--line); border-radius: 9px; background: rgba(24, 28, 41, .7); }
+.search-mode { padding: 7px 12px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font: 600 11px "DM Sans", sans-serif; cursor: pointer; }
+.search-mode:hover, .search-mode.active { color: var(--accent); background: rgba(199, 243, 106, .09); }
 
 .search-form {
   width: min(100%, 630px);
@@ -125,6 +128,16 @@ kbd { padding: 2px 5px; border: 1px solid #343a4a; border-radius: 4px; color: #a
 .result-count { padding-bottom: 4px; color: var(--muted); font-size: 12px; }
 
 .show-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
+.person-search-card, .actor-card { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(24, 28, 41, .83); }
+.person-search-main, .actor-card-main { width: 100%; min-width: 0; display: flex; align-items: center; gap: 13px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.person-search-main:hover strong, .actor-card-main:hover strong { color: var(--accent); }
+.person-search-main img, .actor-card-image { width: 68px; height: 68px; flex: 0 0 68px; border-radius: 50%; object-fit: cover; background: var(--surface-light); }
+.actor-placeholder { display: grid; place-items: center; color: #788096; background: var(--surface-light); }
+.person-search-copy, .actor-card-copy { min-width: 0; display: grid; gap: 5px; }
+.person-search-copy strong, .actor-card-copy strong { font: 600 14px "Space Grotesk", sans-serif; }
+.person-search-copy span, .actor-card-copy span { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.actor-card-copy .actor-role { color: var(--accent); font-size: 10px; }
+.actor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(205px, 1fr)); gap: 12px; }
 .show-card {
   position: relative;
   min-width: 0;
@@ -168,6 +181,22 @@ kbd { padding: 2px 5px; border: 1px solid #343a4a; border-radius: 4px; color: #a
 .status-message.error { border-color: rgba(255, 132, 132, .25); color: #ffb1b1; }
 .status-message[hidden], [hidden] { display: none !important; }
 .show-section { padding-top: 30px; }
+.actor-section { padding-top: 30px; }
+.actor-profile-toolbar { margin-bottom: 12px; }
+.actor-profile-card { padding: 24px; display: flex; align-items: center; gap: 26px; border: 1px solid var(--line); border-radius: 15px; background: linear-gradient(110deg, #1d2230, #181c29); }
+.actor-profile-image { width: 170px; height: 210px; flex: 0 0 170px; border-radius: 11px; object-fit: cover; background: var(--surface-light); }
+.actor-profile-copy { min-width: 0; }
+.actor-profile-copy h1 { margin: 0 0 10px; font-size: clamp(30px, 5vw, 44px); }
+.actor-profile-facts { margin-bottom: 15px; color: var(--accent); font-size: 12px; }
+.actor-biography { max-width: 720px; margin: 0; color: #b7bdca; font-size: 13px; line-height: 1.75; }
+.discovery-block { padding-top: 36px; }
+.discovery-status { grid-column: 1 / -1; margin: 0; padding: 17px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: rgba(24, 28, 41, .55); font-size: 12px; }
+.discovery-status.error { border-color: rgba(255, 132, 132, .25); color: #ffb1b1; }
+.actor-connections, .show-card .show-credit-meta { display: block; overflow: visible; margin: 8px 0 0; color: #d3daa9; font-size: 10px; line-height: 1.5; -webkit-line-clamp: unset; }
+.filmography-filters { margin: 0 0 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+.filmography-filter { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+.filmography-filter select { min-width: 145px; padding: 8px 27px 8px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--text); background: var(--surface); font: 11px "DM Sans", sans-serif; }
+.filmography-filter select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .show-details { padding: 17px 24px 24px; border: 1px solid var(--line); border-radius: 15px; background: linear-gradient(110deg, #1d2230, #181c29); }
 .show-detail-toolbar { margin-bottom: 17px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .back-button { padding: 8px 0; border: 0; color: var(--muted); background: transparent; font: 600 12px "DM Sans", sans-serif; cursor: pointer; }
@@ -254,6 +283,15 @@ footer a { color: #aeb4c2; text-decoration: underline; text-underline-offset: 3p
   main { padding: 0 19px 55px; }
   .hero { padding: 73px 0 54px; }
   .hero-copy { max-width: 310px; margin: 0 auto 26px; font-size: 14px; line-height: 1.6; }
+  .search-modes { margin-bottom: 11px; }
+  .actor-grid { grid-template-columns: 1fr; gap: 9px; }
+  .actor-profile-card { padding: 15px; align-items: flex-start; gap: 14px; }
+  .actor-profile-image { width: 94px; height: 126px; flex-basis: 94px; }
+  .actor-profile-copy h1 { font-size: 25px; }
+  .actor-profile-facts { font-size: 10px; line-height: 1.5; }
+  .actor-biography { font-size: 11px; line-height: 1.6; }
+  .filmography-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .filmography-filter select { min-width: 0; width: 100%; }
   .search-form { height: 58px; padding-left: 14px; gap: 9px; }
   .search-button { min-width: 93px; height: 44px; padding: 0 11px; }
   .search-button .button-arrow { display: none; }

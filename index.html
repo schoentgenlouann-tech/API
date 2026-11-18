@@ -29,8 +29,12 @@
         <h1 id="page-title">TV Show <span>Explorer</span></h1>
         <p class="hero-copy">Search for your favourite TV shows and explore every episode.</p>
 
+        <div class="search-modes" role="group" aria-label="Search by">
+          <button id="search-shows-mode" class="search-mode active" type="button" aria-pressed="true">TV Shows</button>
+          <button id="search-actors-mode" class="search-mode" type="button" aria-pressed="false">Actors</button>
+        </div>
         <form class="search-form" id="search-form" role="search">
-          <label class="sr-only" for="show-query">Search for a TV show</label>
+          <label class="sr-only" for="show-query">Search for a TV show or actor</label>
           <span class="search-icon" aria-hidden="true">⌕</span>
           <input id="show-query" name="query" type="search" placeholder="Try “The Big Bang Theory”" autocomplete="off" maxlength="120">
           <button class="search-button" type="submit"><span>Search</span><span class="button-arrow" aria-hidden="true">→</span></button>
@@ -42,7 +46,7 @@
       <section id="search-section" class="content-section" aria-labelledby="search-heading" hidden>
         <div class="section-heading">
           <div>
-            <p class="eyebrow">PICK YOUR SHOW</p>
+            <p id="search-eyebrow" class="eyebrow">PICK YOUR SHOW</p>
             <h2 id="search-heading">Search results</h2>
           </div>
           <span id="result-count" class="result-count"></span>
@@ -69,6 +73,52 @@
           </label>
         </div>
         <div id="season-list" class="season-list"></div>
+        <section class="discovery-block" aria-labelledby="cast-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">MEET THE PEOPLE</p>
+              <h2 id="cast-heading">Main Cast</h2>
+            </div>
+          </div>
+          <div id="show-cast-list" class="actor-grid" aria-live="polite"></div>
+        </section>
+        <section class="discovery-block" aria-labelledby="related-shows-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">CAST CONNECTIONS</p>
+              <h2 id="related-shows-heading">If You Like This Cast</h2>
+            </div>
+          </div>
+          <div id="related-shows-list" class="show-grid" aria-live="polite"></div>
+        </section>
+      </section>
+
+      <section id="actor-section" class="content-section actor-section" aria-labelledby="actor-name" hidden>
+        <div class="actor-profile-toolbar">
+          <button id="actor-back-button" class="back-button" type="button">← Back</button>
+        </div>
+        <div id="actor-profile" class="actor-profile"></div>
+        <section class="discovery-block" aria-labelledby="actor-recommendations-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">MORE TO DISCOVER</p>
+              <h2 id="actor-recommendations-heading">More Shows Featuring This Actor</h2>
+            </div>
+          </div>
+          <div id="actor-recommendations" class="show-grid"></div>
+        </section>
+        <section class="discovery-block" aria-labelledby="filmography-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ON SCREEN</p>
+              <h2 id="filmography-heading">TV Filmography</h2>
+            </div>
+            <span id="filmography-count" class="result-count"></span>
+          </div>
+          <div id="filmography-filters" class="filmography-filters"></div>
+          <div id="filmography-list" class="show-grid"></div>
+          <p id="filmography-empty" class="empty-favorites" hidden>No TV appearances match these filters.</p>
+        </section>
       </section>
 
       <section id="favorites-section" class="content-section favorites-section" aria-labelledby="favorites-heading" hidden>

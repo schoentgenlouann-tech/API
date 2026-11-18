@@ -10,6 +10,11 @@ const WATCH_STATUSES = [
 const searchForm = document.querySelector("#search-form");
 const searchInput = document.querySelector("#show-query");
 const searchButton = searchForm.querySelector("button");
+const searchShowsMode = document.querySelector("#search-shows-mode");
+const searchActorsMode = document.querySelector("#search-actors-mode");
+const searchHeading = document.querySelector("#search-heading");
+const searchEyebrow = document.querySelector("#search-eyebrow");
+const searchLabel = document.querySelector('label[for="show-query"]');
 const statusMessage = document.querySelector("#status-message");
 const exploreHero = document.querySelector("#explore-hero");
 const navButtons = document.querySelectorAll(".nav-link");
@@ -36,14 +41,35 @@ const continueSection = document.querySelector("#continue-section");
 const continueList = document.querySelector("#continue-list");
 const continueCount = document.querySelector("#continue-count");
 const continueEmpty = document.querySelector("#continue-empty");
+const actorSection = document.querySelector("#actor-section");
+const actorProfile = document.querySelector("#actor-profile");
+const actorBackButton = document.querySelector("#actor-back-button");
+const showCastList = document.querySelector("#show-cast-list");
+const relatedShowsList = document.querySelector("#related-shows-list");
+const actorRecommendations = document.querySelector("#actor-recommendations");
+const filmographyFilters = document.querySelector("#filmography-filters");
+const filmographyList = document.querySelector("#filmography-list");
+const filmographyCount = document.querySelector("#filmography-count");
+const filmographyEmpty = document.querySelector("#filmography-empty");
 const trackingPrompt = document.querySelector("#tracking-prompt");
 const trackingPromptText = document.querySelector("#tracking-prompt-text");
 const trackingPromptAction = document.querySelector("#tracking-prompt-action");
 const trackingPromptDismiss = document.querySelector("#tracking-prompt-dismiss");
 
 const searchCache = new Map();
+const peopleSearchCache = new Map();
 const showCache = new Map();
 const showRequests = new Map();
+const showCastCache = new Map();
+const showCastRequests = new Map();
+const actorCastCreditsCache = new Map();
+const actorCastCreditRequests = new Map();
+const actorGuestCreditsCache = new Map();
+const actorGuestCreditRequests = new Map();
+const personCache = new Map();
+const personRequests = new Map();
+const actorProfileCache = new Map();
+const actorProfileRequests = new Map();
 const episodeCache = new Map();
 const episodeRequests = new Map();
 const knownShows = new Map();
@@ -52,19 +78,38 @@ let watchlist = loadTracking();
 let currentView = "explore";
 let detailReturnView = "explore";
 let watchlistFilter = "all";
+let searchMode = "shows";
 let hasSearchResults = false;
 let activeSearchController;
 let searchSequence = 0;
 let episodeSequence = 0;
+let actorSequence = 0;
+let showDiscoverySequence = 0;
 let watchlistSequence = 0;
 let continueSequence = 0;
 let activeShow;
 let activeEpisodes = [];
+let activeActor;
+let activeFilmography = [];
+let actorReturnState;
+let previousShowState;
+let currentRootView = "explore";
+let filmographyFiltersState = { genre: "all", year: "all", role: "all", sort: "significance" };
 const dismissedPrompts = new Set();
 
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
   searchShows(searchInput.value);
+});
+
+searchShowsMode.addEventListener("click", () => setSearchMode("shows"));
+searchActorsMode.addEventListener("click", () => setSearchMode("actors"));
+actorBackButton.addEventListener("click", returnFromActorProfile);
+filmographyFilters.addEventListener("change", (event) => {
+  const select = event.target instanceof HTMLSelectElement ? event.target : null;
+  if (!select) return;
+  filmographyFiltersState[select.name] = select.value;
+  renderFilmography();
 });
 
 for (const button of navButtons) {
@@ -105,7 +150,7 @@ renderWatchlistFilters();
 async function searchShows(rawQuery) {
   const query = rawQuery.trim();
   if (!query) {
-    showStatus("Enter a show name to start your search.", "error");
+    showStatus(`Enter ${searchMode === "actors" ? "an actor" : "a show"} name to start your search.`, "error");
     searchInput.focus();
     return;
   }
@@ -125,21 +170,26 @@ async function searchShows(rawQuery) {
 
   try {
     const key = query.toLocaleLowerCase();
-    let shows = searchCache.get(key);
-    if (!shows) {
-      const response = await fetch(`${API_BASE}/search/shows?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+    const cache = searchMode === "actors" ? peopleSearchCache : searchCache;
+    let matches = cache.get(key);
+    if (!matches) {
+      const endpoint = searchMode === "actors" ? "people" : "shows";
+      const response = await fetch(`${API_BASE}/search/${endpoint}?q=${encodeURIComponent(query)}`, { signal: controller.signal });
       if (!response.ok) throw new Error(`TVmaze returned HTTP ${response.status} while searching.`);
-      shows = await response.json();
-      if (!Array.isArray(shows)) throw new Error("TVmaze returned an unexpected search response.");
-      searchCache.set(key, shows);
+      matches = await response.json();
+      if (!Array.isArray(matches)) throw new Error("TVmaze returned an unexpected search response.");
+      cache.set(key, matches);
     }
     if (sequence !== searchSequence) return;
-    if (!shows.length) {
-      showStatus(`No shows found for “${query}”. Try another title.`, "error");
+    const validMatches = matches.filter((match) => searchMode === "actors"
+      ? Number.isInteger(match?.person?.id)
+      : Number.isInteger(match?.show?.id));
+    if (!validMatches.length) {
+      showStatus(`No ${searchMode === "actors" ? "actors" : "shows"} found for “${query}”. Try another search.`, "error");
       return;
     }
 
-    renderSearchResults(shows);
+    renderSearchResults(validMatches, searchMode);
     clearStatus();
   } catch (error) {
     if (error.name === "AbortError") return;
@@ -149,11 +199,56 @@ async function searchShows(rawQuery) {
   }
 }
 
-function renderSearchResults(matches) {
-  resultsContainer.replaceChildren(...matches.map(({ show }) => createShowCard(show)));
+function renderSearchResults(matches, mode) {
+  resultsContainer.replaceChildren(...matches.map(({ show, person }) =>
+    mode === "actors" ? createPersonSearchCard(person) : createShowCard(show)));
+  searchHeading.textContent = mode === "actors" ? "Actor results" : "Search results";
+  searchEyebrow.textContent = mode === "actors" ? "FIND YOUR FAVORITE ACTOR" : "PICK YOUR SHOW";
   resultCount.textContent = `${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
   hasSearchResults = true;
   searchSection.hidden = false;
+}
+
+function setSearchMode(mode) {
+  const previousMode = searchMode;
+  searchMode = mode === "actors" ? "actors" : "shows";
+  const actors = searchMode === "actors";
+  searchShowsMode.classList.toggle("active", !actors);
+  searchActorsMode.classList.toggle("active", actors);
+  searchShowsMode.setAttribute("aria-pressed", String(!actors));
+  searchActorsMode.setAttribute("aria-pressed", String(actors));
+  searchInput.placeholder = actors ? "Try an actor name, like “Johnny Galecki”" : "Try “The Big Bang Theory”";
+  searchInput.setAttribute("aria-label", actors ? "Search for an actor" : "Search for a TV show");
+  searchLabel.textContent = actors ? "Search for an actor" : "Search for a TV show";
+  searchEyebrow.textContent = actors ? "FIND YOUR FAVORITE ACTOR" : "PICK YOUR SHOW";
+  if (previousMode !== searchMode) clearStatus();
+  if (hasSearchResults) {
+    hasSearchResults = false;
+    searchSection.hidden = true;
+    resultsContainer.replaceChildren();
+    resultCount.textContent = "";
+  }
+}
+
+function createPersonSearchCard(person) {
+  const card = document.createElement("article");
+  card.className = "person-search-card";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "person-search-main";
+  const image = createImage(person?.image?.medium, person?.name);
+  button.append(image || createPlaceholder("actor-placeholder", "♟"));
+  const copy = document.createElement("span");
+  copy.className = "person-search-copy";
+  const name = document.createElement("strong");
+  name.textContent = person?.name || "Unknown actor";
+  const details = document.createElement("span");
+  details.textContent = [person?.country?.name, person?.birthday ? `Born ${premiereYear(person.birthday)}` : ""].filter(Boolean).join(" · ") || "TV actor";
+  copy.append(name, details);
+  button.append(copy);
+  if (Number.isInteger(person?.id)) button.addEventListener("click", () => openActorProfile(person));
+  card.append(button);
+  return card;
 }
 
 function createShowCard(show, { favoriteView = false, watchlistView = false, continueView = false } = {}) {
@@ -274,10 +369,18 @@ async function openShow(show, returnView = currentView) {
     showStatus("This result has an invalid TVmaze show ID. Choose another show.", "error");
     return;
   }
+  if (returnView === "show" && currentView === "show" && activeShow && activeEpisodes.length) {
+    previousShowState = { show: activeShow, episodes: activeEpisodes, returnView: detailReturnView };
+  } else if (returnView !== "actor") {
+    previousShowState = undefined;
+  }
   detailReturnView = returnView;
-  setView(returnView);
+  setView("show");
   searchSection.hidden = true;
   favoritesSection.hidden = true;
+  watchlistSection.hidden = true;
+  continueSection.hidden = true;
+  actorSection.hidden = true;
   showSection.hidden = false;
   activeShow = undefined;
   activeEpisodes = [];
@@ -294,8 +397,7 @@ async function openShow(show, returnView = currentView) {
     clearStatus();
   } catch (error) {
     if (sequence === episodeSequence) {
-      showSection.hidden = true;
-      setView(returnView);
+      returnFromShow();
       showStatus(error.message || "Could not load this show's episodes. Please try again.", "error");
     }
   }
@@ -351,6 +453,503 @@ async function getEpisodes(showId) {
   }
 }
 
+async function getShowCast(showId) {
+  if (showCastCache.has(showId)) return showCastCache.get(showId);
+  if (showCastRequests.has(showId)) return showCastRequests.get(showId);
+  const request = fetch(`${API_BASE}/shows/${showId}/cast`).then(async (response) => {
+    if (!response.ok) throw new Error(`TVmaze returned HTTP ${response.status} while loading the cast.`);
+    const cast = await response.json();
+    if (!Array.isArray(cast)) throw new Error("TVmaze returned an unexpected cast response.");
+    showCastCache.set(showId, cast);
+    return cast;
+  });
+  showCastRequests.set(showId, request);
+  try {
+    return await request;
+  } finally {
+    if (showCastRequests.get(showId) === request) showCastRequests.delete(showId);
+  }
+}
+
+function getPerson(personId) {
+  if (personCache.has(personId)) return Promise.resolve(personCache.get(personId));
+  if (personRequests.has(personId)) return personRequests.get(personId);
+  const request = fetch(`${API_BASE}/people/${personId}`).then(async (response) => {
+    if (!response.ok) throw new Error(`TVmaze returned HTTP ${response.status} while loading an actor profile.`);
+    const person = await response.json();
+    if (!person || person.id !== personId) throw new Error("TVmaze returned unexpected actor details.");
+    personCache.set(personId, person);
+    return person;
+  });
+  personRequests.set(personId, request);
+  return request.finally(() => {
+    if (personRequests.get(personId) === request) personRequests.delete(personId);
+  });
+}
+
+function getActorCastCredits(personId) {
+  return getCreditList(personId, "castcredits", actorCastCreditsCache, actorCastCreditRequests);
+}
+
+function getActorGuestCredits(personId) {
+  return getCreditList(personId, "guestcastcredits", actorGuestCreditsCache, actorGuestCreditRequests);
+}
+
+function getCreditList(personId, path, cache, requests) {
+  if (cache.has(personId)) return Promise.resolve(cache.get(personId));
+  if (requests.has(personId)) return requests.get(personId);
+  const request = fetch(`${API_BASE}/people/${personId}/${path}?embed=${path === "castcredits" ? "show" : "episode"}`)
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`TVmaze returned HTTP ${response.status} while loading actor credits.`);
+      const credits = await response.json();
+      if (!Array.isArray(credits)) throw new Error("TVmaze returned an unexpected credits response.");
+      cache.set(personId, credits);
+      return credits;
+    });
+  requests.set(personId, request);
+  return request.finally(() => {
+    if (requests.get(personId) === request) requests.delete(personId);
+  });
+}
+
+function createStatusNote(message, isError = false) {
+  const note = document.createElement("p");
+  note.className = isError ? "discovery-status error" : "discovery-status";
+  note.setAttribute("role", isError ? "alert" : "status");
+  note.textContent = message;
+  return note;
+}
+
+async function loadShowDiscovery(show, sequence) {
+  try {
+    const cast = await getShowCast(show.id);
+    if (sequence !== showDiscoverySequence || activeShow?.id !== show.id) return;
+    renderShowCast(cast);
+    if (!cast.length) {
+      relatedShowsList.replaceChildren(createStatusNote("TVmaze has no cast credits for this show yet."));
+      return;
+    }
+
+    const featuredCast = cast.slice(0, 12);
+    const creditLoads = await mapWithLimit(featuredCast, 4, async ({ person }) => {
+      if (!person?.id) return { credits: [], failed: true };
+      try {
+        return { credits: await getActorCastCredits(person.id), failed: false };
+      } catch {
+        return { credits: [], failed: true };
+      }
+    });
+    if (sequence !== showDiscoverySequence || activeShow?.id !== show.id) return;
+    const recommendations = collectCastRecommendations(show, featuredCast, creditLoads.map(({ credits }) => credits));
+    const failedCredits = creditLoads.some(({ failed }) => failed);
+    if (failedCredits && !recommendations.length) {
+      relatedShowsList.replaceChildren(createStatusNote("TVmaze cast credits could not be loaded. Please try again later.", true));
+    } else {
+      renderDiscoveryShows(relatedShowsList, recommendations, "No other TV shows were found through this cast.");
+      if (failedCredits) {
+        relatedShowsList.prepend(createStatusNote("Some cast credits could not be loaded; these recommendations may be incomplete.", true));
+      }
+    }
+  } catch (error) {
+    if (sequence !== showDiscoverySequence || activeShow?.id !== show.id) return;
+    showCastList.replaceChildren(createStatusNote(error.message || "Could not load this show's cast.", true));
+    relatedShowsList.replaceChildren(createStatusNote("Cast-based recommendations are unavailable right now.", true));
+  }
+}
+
+function renderShowCast(cast) {
+  const uniqueCast = new Map();
+  for (const entry of cast) {
+    const person = entry.person;
+    if (person?.id && !uniqueCast.has(person.id)) uniqueCast.set(person.id, entry);
+  }
+  showCastList.replaceChildren(...[...uniqueCast.values()].map(createActorCastCard));
+  if (!uniqueCast.size) showCastList.append(createStatusNote("TVmaze has no cast credits for this show yet."));
+}
+
+function createActorCastCard(entry) {
+  const person = entry.person;
+  const card = document.createElement("article");
+  card.className = "actor-card";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "actor-card-main";
+  const portrait = createImage(person.image?.medium, person.name);
+  if (portrait) {
+    portrait.className = "actor-card-image";
+    button.append(portrait);
+  } else {
+    button.append(createPlaceholder("actor-placeholder actor-card-image", "♟"));
+  }
+  const copy = document.createElement("span");
+  copy.className = "actor-card-copy";
+  const name = document.createElement("strong");
+  name.textContent = person.name || "Unknown actor";
+  const character = document.createElement("span");
+  character.textContent = entry.character?.name ? `as ${entry.character.name}` : "Character details unavailable";
+  const role = document.createElement("span");
+  role.className = "actor-role";
+  role.textContent = entry.voice ? "Voice" : "Main cast";
+  copy.append(name, character, role);
+  button.append(copy);
+  button.addEventListener("click", () => openActorProfile(person));
+  card.append(button);
+  return card;
+}
+
+function collectCastRecommendations(currentShow, cast, creditsByActor) {
+  const recommendations = new Map();
+  cast.forEach(({ person }, index) => {
+    if (!person?.id) return;
+    const rankValue = Math.max(1, cast.length - index);
+    for (const credit of creditsByActor[index] || []) {
+      const show = credit?._embedded?.show;
+      if (!show?.id || show.id === currentShow.id) continue;
+      let recommendation = recommendations.get(show.id);
+      if (!recommendation) {
+        recommendation = { show, actors: new Set(), score: 0 };
+        recommendations.set(show.id, recommendation);
+      }
+      recommendation.actors.add(person.name);
+      recommendation.score += rankValue;
+    }
+  });
+  return [...recommendations.values()]
+    .sort((a, b) => b.actors.size - a.actors.size
+      || b.score - a.score
+      || (b.show.rating?.average || 0) - (a.show.rating?.average || 0))
+    .slice(0, 6);
+}
+
+function renderDiscoveryShows(container, recommendations, emptyMessage) {
+  if (!recommendations.length) {
+    container.replaceChildren(createStatusNote(emptyMessage));
+    return;
+  }
+  container.replaceChildren(...recommendations.map(({ show, actors, credit }) => {
+    const card = createDiscoveryShowCard(show);
+    const copy = card.querySelector(".show-card-copy");
+    const rating = show.rating?.average;
+    const meta = card.querySelector(".show-meta");
+    if (meta && rating != null) meta.textContent = `${meta.textContent} · ★ ${rating}`;
+    if (actors?.size) {
+      const names = document.createElement("p");
+      names.className = "actor-connections";
+      names.textContent = `Connected by ${[...actors].join(", ")}`;
+      copy.append(names);
+    }
+    if (credit) {
+      const creditLine = document.createElement("p");
+      creditLine.className = "show-credit-meta";
+      creditLine.textContent = credit;
+      copy.append(creditLine);
+    }
+    return card;
+  }));
+}
+
+function createDiscoveryShowCard(show) {
+  return createShowCard(show);
+}
+
+async function mapWithLimit(items, limit, handler) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await handler(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+async function openActorProfile(person) {
+  if (!Number.isInteger(person?.id) || person.id <= 0) {
+    showStatus("This actor result has an invalid TVmaze ID. Choose another actor.", "error");
+    return;
+  }
+  actorReturnState = {
+    view: currentView,
+    show: currentView === "show" ? activeShow : undefined,
+    episodes: currentView === "show" ? activeEpisodes : undefined,
+  };
+  actorBackButton.textContent = actorReturnState.view === "show" ? "← Back to show" : "← Back to results";
+  activeActor = person;
+  activeFilmography = [];
+  filmographyFiltersState = { genre: "all", year: "all", role: "all", sort: "significance" };
+  setView("actor");
+  actorProfile.replaceChildren(createStatusNote(`Loading ${person.name}'s profile and TV credits…`));
+  actorRecommendations.replaceChildren();
+  filmographyList.replaceChildren();
+  filmographyEmpty.hidden = true;
+  filmographyFilters.replaceChildren();
+  filmographyCount.textContent = "";
+  const sequence = ++actorSequence;
+  try {
+    const profileData = await getActorProfileData(person.id);
+    if (sequence !== actorSequence) return;
+    activeActor = profileData.person;
+    activeFilmography = profileData.filmography;
+    renderActorProfile(profileData);
+    if (profileData.creditErrors.length) {
+      actorProfile.append(createStatusNote("Some TVmaze credit sources could not be loaded; the filmography may be incomplete.", true));
+    }
+  } catch (error) {
+    if (sequence === actorSequence) {
+      actorProfile.replaceChildren(createStatusNote(error.message || "Could not load this actor's profile. Please try again.", true));
+      actorRecommendations.replaceChildren(createStatusNote("Actor recommendations are unavailable.", true));
+    }
+  }
+}
+
+async function getActorProfileData(personId) {
+  if (actorProfileCache.has(personId)) return actorProfileCache.get(personId);
+  if (actorProfileRequests.has(personId)) return actorProfileRequests.get(personId);
+  const request = (async () => {
+    const [personResult, castResult, guestResult] = await Promise.allSettled([
+      getPerson(personId),
+      getActorCastCredits(personId),
+      getActorGuestCredits(personId),
+    ]);
+    if (personResult.status === "rejected") throw personResult.reason;
+    const castCredits = castResult.status === "fulfilled" ? castResult.value : [];
+    const guestCredits = guestResult.status === "fulfilled" ? guestResult.value : [];
+    const records = new Map();
+    for (const credit of castCredits) {
+      const show = credit?._embedded?.show;
+      if (!show?.id) continue;
+      const record = getFilmographyRecord(records, show);
+      record.roles.add("series");
+      addCharacter(record, credit);
+    }
+    const guestByShow = new Map();
+    for (const credit of guestCredits) {
+      const episode = credit?._embedded?.episode;
+      const showId = linkedShowId(credit?._links?.show?.href);
+      if (!showId) continue;
+      if (!guestByShow.has(showId)) guestByShow.set(showId, []);
+      guestByShow.get(showId).push({ credit, episode });
+    }
+    const missingShows = [...guestByShow.keys()].filter((id) => !records.has(id));
+    const unavailableShowIds = new Set();
+    const showResults = await mapWithLimit(missingShows, 4, async (id) => {
+      try {
+        return await getShow(id);
+      } catch {
+        unavailableShowIds.add(id);
+        return null;
+      }
+    });
+    for (let index = 0; index < missingShows.length; index += 1) {
+      const show = showResults[index];
+      if (!show) continue;
+      const record = getFilmographyRecord(records, show);
+      for (const { credit, episode } of guestByShow.get(show.id)) {
+        record.roles.add("guest");
+        addCharacter(record, credit);
+        const airdate = episode?.airdate || episode?.airstamp?.slice(0, 10);
+        if (airdate) record.years.add(premiereYear(airdate));
+      }
+    }
+    for (const [showId, guestEntries] of guestByShow) {
+      const record = records.get(showId);
+      if (!record) continue;
+      for (const { credit, episode } of guestEntries) {
+        record.roles.add("guest");
+        addCharacter(record, credit);
+        const airdate = episode?.airdate || episode?.airstamp?.slice(0, 10);
+        if (airdate) record.years.add(premiereYear(airdate));
+      }
+    }
+    const filmography = [...records.values()].map((record) => ({
+      show: record.show,
+      roles: record.roles,
+      characters: [...record.characters],
+      years: [...record.years].filter(Boolean).sort(),
+    }));
+    const result = {
+      person: personResult.value,
+      filmography,
+      creditErrors: [
+        ...[castResult, guestResult].filter((entry) => entry.status === "rejected"),
+        ...[...unavailableShowIds].map(() => ({ status: "rejected" })),
+      ],
+    };
+    if (!result.creditErrors.length) actorProfileCache.set(personId, result);
+    return result;
+  })();
+  actorProfileRequests.set(personId, request);
+  try {
+    return await request;
+  } finally {
+    if (actorProfileRequests.get(personId) === request) actorProfileRequests.delete(personId);
+  }
+}
+
+function getFilmographyRecord(records, show) {
+  let record = records.get(show.id);
+  if (!record) {
+    record = { show, roles: new Set(), characters: new Set(), years: new Set() };
+    records.set(show.id, record);
+  } else if (record.show.name?.startsWith("TV show ")) {
+    record.show = show;
+  }
+  return record;
+}
+
+function addCharacter(record, credit) {
+  const name = credit?._links?.character?.name;
+  if (name) record.characters.add(name);
+}
+
+function linkedShowId(href) {
+  const match = typeof href === "string" ? href.match(/\/shows\/(\d+)(?:\/|$)/) : null;
+  return match ? Number(match[1]) : null;
+}
+
+function renderActorProfile(profileData) {
+  const { person, filmography } = profileData;
+  const card = document.createElement("div");
+  card.className = "actor-profile-card";
+  const portrait = createImage(person.image?.original || person.image?.medium, person.name);
+  if (portrait) {
+    portrait.className = "actor-profile-image";
+    card.append(portrait);
+  } else {
+    card.append(createPlaceholder("actor-placeholder actor-profile-image", "♟"));
+  }
+  const copy = document.createElement("div");
+  copy.className = "actor-profile-copy";
+  const title = document.createElement("h1");
+  title.id = "actor-name";
+  title.textContent = person.name || "Actor";
+  const details = document.createElement("p");
+  details.className = "actor-profile-facts";
+  details.textContent = [
+    person.birthday ? `Born ${formatDate(person.birthday)}` : "",
+    person.country?.name || "",
+    person.gender || "",
+  ].filter(Boolean).join(" · ") || "Profile details provided by TVmaze";
+  const bio = document.createElement("p");
+  bio.className = "actor-biography";
+  bio.textContent = summaryText(person.summary || person.biography)
+    || "TVmaze does not provide a biography for this actor. Explore their credited TV roles below.";
+  copy.append(title, details, bio);
+  card.append(copy);
+  actorProfile.replaceChildren(card);
+  renderFilmographyFilters();
+  renderFilmography();
+  const recommendations = filmography
+    .slice()
+    .sort((a, b) => Number(b.roles.has("series")) - Number(a.roles.has("series"))
+      || (b.show.rating?.average || 0) - (a.show.rating?.average || 0))
+    .slice(0, 6)
+    .map((entry) => ({
+      show: entry.show,
+      credit: `${[...entry.roles].map((role) => role === "series" ? "Series cast" : "Guest star").join(" · ")}${entry.characters.length ? ` · ${entry.characters.join(", ")}` : ""}`,
+    }));
+  renderDiscoveryShows(actorRecommendations, recommendations, "No TV show credits are currently listed for this actor.");
+}
+
+function renderFilmographyFilters() {
+  const genres = [...new Set(activeFilmography.flatMap(({ show }) => show.genres || []))].sort();
+  const years = [...new Set(activeFilmography.map(({ show }) => premiereYear(show.premiered)).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+  const controls = [
+    ["genre", "Genre", genres],
+    ["year", "Release year", years],
+    ["role", "Role", ["series", "guest"]],
+    ["sort", "Sort", ["significance", "popularity", "year"]],
+  ];
+  filmographyFilters.replaceChildren(...controls.map(([name, label, values]) => {
+    const wrapper = document.createElement("label");
+    wrapper.className = "filmography-filter";
+    wrapper.textContent = label;
+    const select = document.createElement("select");
+    select.name = name;
+    select.setAttribute("aria-label", `Filter filmography by ${label.toLowerCase()}`);
+    if (name === "sort") {
+      for (const [value, text] of [["significance", "Recommended"], ["popularity", "Popularity"], ["year", "Newest first"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        select.append(option);
+      }
+    } else {
+      const all = document.createElement("option");
+      all.value = "all";
+      all.textContent = `All ${label.toLowerCase()}s`;
+      select.append(all);
+      for (const value of values) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = name === "role"
+          ? value === "series" ? "Series cast" : "Guest star"
+          : value;
+        select.append(option);
+      }
+    }
+    select.value = filmographyFiltersState[name] || (name === "sort" ? "significance" : "all");
+    wrapper.append(select);
+    return wrapper;
+  }));
+}
+
+function renderFilmography() {
+  const filtered = activeFilmography.filter(({ show, roles }) =>
+    (filmographyFiltersState.genre === "all" || show.genres?.includes(filmographyFiltersState.genre))
+    && (filmographyFiltersState.year === "all" || premiereYear(show.premiered) === filmographyFiltersState.year)
+    && (filmographyFiltersState.role === "all" || roles.has(filmographyFiltersState.role)));
+  const sort = filmographyFiltersState.sort;
+  filtered.sort((a, b) => sort === "popularity"
+    ? (b.show.weight || b.show.rating?.average || 0) - (a.show.weight || a.show.rating?.average || 0)
+    : sort === "year"
+      ? premiereYear(b.show.premiered).localeCompare(premiereYear(a.show.premiered))
+      : Number(b.roles.has("series")) - Number(a.roles.has("series"))
+        || (b.show.rating?.average || 0) - (a.show.rating?.average || 0));
+  filmographyCount.textContent = `${filtered.length} ${filtered.length === 1 ? "show" : "shows"}`;
+  filmographyEmpty.hidden = filtered.length !== 0;
+  filmographyList.hidden = filtered.length === 0;
+  filmographyList.replaceChildren(...filtered.map((entry) => {
+    const roleText = [...entry.roles].map((role) => role === "series" ? "Series cast" : "Guest star").join(" · ");
+    const showRun = entry.roles.has("series")
+      ? `Series aired ${premiereYear(entry.show.premiered)}${entry.show.ended && premiereYear(entry.show.ended) !== premiereYear(entry.show.premiered) ? `–${premiereYear(entry.show.ended)}` : ""}`
+      : "";
+    const guestYears = entry.roles.has("guest") && entry.years.length
+      ? `Guest appearances ${entry.years.join(", ")}`
+      : "";
+    const creditText = [
+      roleText,
+      entry.characters.length ? `as ${entry.characters.join(", ")}` : "",
+      showRun,
+      guestYears,
+    ].filter(Boolean).join(" · ");
+    const card = createDiscoveryShowCard(entry.show);
+    const copy = card.querySelector(".show-card-copy");
+    const credit = document.createElement("p");
+    credit.className = "show-credit-meta";
+    credit.textContent = creditText;
+    copy.append(credit);
+    const rating = entry.show.rating?.average;
+    const meta = card.querySelector(".show-meta");
+    if (meta && rating != null) meta.textContent = `${meta.textContent} · ★ ${rating}`;
+    return card;
+  }));
+}
+
+function returnFromActorProfile() {
+  const previous = actorReturnState || { view: "explore" };
+  actorSequence += 1;
+  if (previous.view === "show" && previous.show && previous.episodes) {
+    detailReturnView = "show";
+    setView("show");
+    renderShow(previous.show, previous.episodes);
+  } else {
+    setView(previous.view);
+  }
+}
+
 function renderShow(show, episodes) {
   activeShow = show;
   activeEpisodes = episodes;
@@ -360,11 +959,12 @@ function renderShow(show, episodes) {
   const backButton = document.createElement("button");
   backButton.type = "button";
   backButton.className = "back-button";
-  backButton.textContent = detailReturnView === "favorites" ? "← Back to favorites" : "← Back to results";
-  backButton.addEventListener("click", () => {
-    showSection.hidden = true;
-    setView(detailReturnView);
-  });
+  backButton.textContent = detailReturnView === "actor" ? "← Back to actor" :
+    detailReturnView === "show" ? "← Back to show" :
+      detailReturnView === "favorites" ? "← Back to favorites" :
+        detailReturnView === "watchlist" ? "← Back to watchlist" :
+          detailReturnView === "continue" ? "← Back to Continue Watching" : "← Back to results";
+  backButton.addEventListener("click", returnFromShow);
   toolbar.append(backButton, createWatchlistControl(show, { includeRemove: true }), createFavoriteButton(show, false));
 
   const content = document.createElement("div");
@@ -405,6 +1005,9 @@ function renderShow(show, episodes) {
   episodeTotal.textContent = episodes.length;
   renderTrackingPrompt(show, episodes);
   renderSeasons(seasons, show);
+  showCastList.replaceChildren(createStatusNote("Loading cast…"));
+  relatedShowsList.replaceChildren(createStatusNote("Finding shows with overlapping cast…"));
+  loadShowDiscovery(show, ++showDiscoverySequence);
 }
 
 function seasonEntries(episodes) {
@@ -936,8 +1539,12 @@ function updateFavoriteCount() {
 }
 
 function setView(view) {
-  const views = ["explore", "favorites", "watchlist", "continue"];
+  const views = ["explore", "favorites", "watchlist", "continue", "show", "actor"];
   currentView = views.includes(view) ? view : "explore";
+  if (["explore", "favorites", "watchlist", "continue"].includes(currentView)) {
+    currentRootView = currentView;
+    previousShowState = undefined;
+  }
   if (currentView !== "explore") {
     activeSearchController?.abort();
     activeSearchController = undefined;
@@ -945,14 +1552,15 @@ function setView(view) {
     searchButton.disabled = false;
   }
   for (const button of navButtons) {
-    const active = button.dataset.view === currentView;
+    const active = button.dataset.view === currentRootView;
     button.classList.toggle("active", active);
     if (active) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   }
   exploreHero.hidden = currentView !== "explore";
   searchSection.hidden = currentView !== "explore" || !hasSearchResults;
-  showSection.hidden = true;
+  showSection.hidden = currentView !== "show";
+  actorSection.hidden = currentView !== "actor";
   favoritesSection.hidden = currentView !== "favorites";
   watchlistSection.hidden = currentView !== "watchlist";
   continueSection.hidden = currentView !== "continue";
@@ -962,16 +1570,38 @@ function setView(view) {
   if (currentView === "continue") renderContinueWatching();
 }
 
+function returnFromShow() {
+  showDiscoverySequence += 1;
+  if (detailReturnView === "actor") {
+    setView("actor");
+    return;
+  }
+  if (detailReturnView === "show" && previousShowState) {
+    const previous = previousShowState;
+    previousShowState = undefined;
+    detailReturnView = previous.returnView;
+    setView("show");
+    renderShow(previous.show, previous.episodes);
+    return;
+  }
+  showSection.hidden = true;
+  setView(detailReturnView);
+}
+
 function createImage(source, alt) {
   if (!source) return null;
   const image = document.createElement("img");
   image.src = source;
-  image.alt = alt ? `${alt} poster` : "";
+  image.alt = alt || "";
   image.loading = "lazy";
   image.addEventListener("error", () => {
     const placeholderClass = image.classList.contains("episode-image")
       ? "episode-image-placeholder"
-      : image.closest(".show-detail-content") ? "show-poster-placeholder" : "poster-placeholder";
+      : image.classList.contains("actor-profile-image")
+        ? "actor-placeholder actor-profile-image"
+        : image.classList.contains("actor-card-image")
+          ? "actor-placeholder actor-card-image"
+        : image.closest(".show-detail-content") ? "show-poster-placeholder" : "poster-placeholder";
     image.replaceWith(createPlaceholder(placeholderClass, "▣"));
   }, { once: true });
   return image;

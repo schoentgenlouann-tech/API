@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111827">
+    <title>TV Show Explorer</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="wordmark" href="#" aria-label="TV Show Explorer home">
+        <span class="brand-icon" aria-hidden="true">▶</span>
+        <span>TV<span class="brand-accent">EXPLORER</span></span>
+      </a>
+      <a class="header-link" href="https://www.tvmaze.com/api" target="_blank" rel="noreferrer">About the data <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <p class="eyebrow"><span class="eyebrow-dot"></span> YOUR NEXT BINGE STARTS HERE</p>
+        <h1 id="page-title">TV Show <span>Explorer</span></h1>
+        <p class="hero-copy">Search for your favourite TV shows and explore every episode.</p>
+
+        <form class="search-form" id="search-form" role="search">
+          <label class="sr-only" for="show-query">Search for a TV show</label>
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="show-query" name="query" type="search" placeholder="Try “The Big Bang Theory”" autocomplete="off" maxlength="120">
+          <button class="search-button" type="submit"><span>Search</span><span class="button-arrow" aria-hidden="true">→</span></button>
+        </form>
+        <p class="search-hint">Press <kbd>Enter</kbd> to search</p>
+      </section>
+
+      <div id="status-message" class="status-message" role="status" aria-live="polite" hidden></div>
+      <section id="search-section" class="content-section" aria-labelledby="search-heading" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">PICK YOUR SHOW</p>
+            <h2 id="search-heading">Search results</h2>
+          </div>
+          <span id="result-count" class="result-count"></span>
+        </div>
+        <div id="show-results" class="show-grid"></div>
+      </section>
+
+      <section id="show-section" class="content-section show-section" aria-labelledby="show-title" hidden>
+        <div id="show-details" class="show-details"></div>
+        <div class="episodes-heading">
+          <div>
+            <p class="eyebrow">THE COMPLETE GUIDE</p>
+            <h2>Episodes <span id="episode-total" class="total-badge"></span></h2>
+          </div>
+          <label class="season-select-label" for="season-select">Jump to season
+            <select id="season-select" aria-label="Jump to season"></select>
+          </label>
+        </div>
+        <div id="season-list" class="season-list"></div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Made for the love of television.</span>
+      <span>Show and episode data provided by <a href="https://www.tvmaze.com/" target="_blank" rel="noreferrer">TVmaze</a> · Licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA</a></span>
+    </footer>
+  </body>
+</html>

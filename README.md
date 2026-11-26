@@ -14,7 +14,7 @@ The app lets you:
 
 ## Data collection
 
-Show, episode, cast, actor, and credit information is retrieved from the public [TVmaze API](https://www.tvmaze.com/api) when you use the app. The app does not collect or send personal information to a project server. TVmaze data and images are provided by TVmaze; see its [API terms](https://www.tvmaze.com/api) and the attribution in the app for licensing details.
+Show, episode, cast, actor, and credit information is retrieved from the public [TVmaze API](https://www.tvmaze.com/api) when you use the app. Search terms entered in Explore are sent to TVmaze to retrieve results. Favorites, watch statuses, and watched episode IDs stay in your browser and are not sent to TVmaze or a project server. TVmaze data and images are provided by TVmaze; see its [API terms](https://www.tvmaze.com/api) and the attribution in the app for licensing details.
 
 ## Data persistence
 

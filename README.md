@@ -41,7 +41,7 @@ No package installation or build step is required. You need a modern browser and
    python3 -m http.server 8000
    ```
 
-3. Open [http://localhost:8000](http://localhost:8000) in your browser.
+3. Open the local preview at [http://127.0.0.1:8000](http://127.0.0.1:8000). This URL works only on the computer running the server while it is running; it is not a public deployment.
 
 The app consists of `index.html`, `styles.css`, and `app.js`.
 
